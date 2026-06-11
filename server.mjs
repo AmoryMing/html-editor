@@ -137,8 +137,9 @@ const server = http.createServer((req, res) => {
         const src = safe(rel);
         let target = src, backup = null;
         if (mode === 'freeze') target = src.replace(/\.html?$/i, '') + '·静态.html';
+        else if (mode === 'deliver') target = src.replace(/\.html?$/i, '').replace(/·静态$/, '') + '·交付.html';
         // 编辑模式必须带加载时的 mtime 且与磁盘一致，否则拒绝——防止旧标签页把别人（或 Claude）的改动顶掉
-        if (mode !== 'freeze' && fs.existsSync(target)) {
+        if (mode === 'edit' && fs.existsSync(target)) {
           const cur = fs.statSync(target).mtimeMs;
           if (typeof mtime !== 'number' || Math.abs(cur - mtime) > 0.5) {
             res.writeHead(409, { 'Content-Type': MIME['.json'] });

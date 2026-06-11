@@ -86,8 +86,11 @@
     node.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
     return node;
   }
-  function serialize() {
+  function serialize(saveMode) {
     const clone = document.documentElement.cloneNode(true);
+    clone.classList.remove('hx-hide-notes');
+    if (!clone.getAttribute('class')) clone.removeAttribute('class');
+    if (saveMode === 'deliver') clone.querySelectorAll('[data-hx-note]').forEach(n => n.remove());
     // iframe srcdoc 写回：内部 DOM 的改动序列化回 clone 的 srcdoc 属性
     const live = [...document.querySelectorAll('iframe')];
     const cl = [...clone.querySelectorAll('iframe')];
@@ -264,22 +267,41 @@
   }
 
   /* ---------- 保存 ---------- */
-  async function save() {
+  async function save(saveMode) {
     commitEdit();
-    const body = JSON.stringify({ path: PATH, html: serialize(), mode: S.mode, mtime: window.__HX_MTIME });
+    const m = saveMode || S.mode;
+    const noteCount = document.querySelectorAll('[data-hx-note]').length;
+    const body = JSON.stringify({ path: PATH, html: serialize(m), mode: m, mtime: window.__HX_MTIME });
     try {
       const r = await fetch('/__save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error);
-      if (S.mode !== 'freeze' && j.mtime) window.__HX_MTIME = j.mtime;   // 本标签页继续保存不受阻
-      toast(S.mode === 'freeze'
+      if (m === 'edit' && j.mtime) window.__HX_MTIME = j.mtime;   // 本标签页继续保存不受阻
+      toast(m === 'freeze'
         ? `已冻结另存 → ${j.savedTo} （${(j.bytes / 1024).toFixed(0)} KB）。回到文件列表打开它即可静态编辑`
-        : `已保存 ✓ ${j.savedTo}${j.backup ? ' （备份: ' + j.backup + '）' : ''}`, 5000);
+        : m === 'deliver'
+          ? `已导出交付版 → ${j.savedTo}（剥离 ${noteCount} 处标注，工作稿未动）`
+          : `已保存 ✓ ${j.savedTo}${j.backup ? ' （备份: ' + j.backup + '）' : ''}`, 5000);
       return j;
     } catch (e) {
       toast('保存失败：' + e.message, 9000);
       return { ok: false, error: String(e) };
     }
+  }
+  function toggleNote() {
+    if (!S.sel) return toast('先选中要标注的元素');
+    snapshot();
+    if (S.sel.hasAttribute('data-hx-note')) {
+      S.sel.removeAttribute('data-hx-note');
+      toast('已取消标注');
+    } else {
+      S.sel.setAttribute('data-hx-note', '1');
+      toast('已标记为标注（橙色虚框）— 「交付另存」时会被剥离，平时保存保留');
+    }
+  }
+  function toggleNotesVisible() {
+    const hidden = document.documentElement.classList.toggle('hx-hide-notes');
+    toast(hidden ? '已隐藏全部标注（预览交付效果）' : '已显示全部标注');
   }
 
   /* ---------- UI ---------- */
@@ -297,6 +319,8 @@
 #__hx .hx-sep{width:1px;height:16px;background:#e5e7eb}
 .hx-hov{outline:1px dashed #818cf8 !important;outline-offset:1px !important;cursor:default !important}
 .hx-sel{outline:2px solid #4f46e5 !important;outline-offset:2px !important}
+[data-hx-note]{outline:1.5px dashed #d08838 !important;outline-offset:2px;background:rgba(208,136,56,.07) !important}
+html.hx-hide-notes [data-hx-note]{display:none !important}
 #__hx_toast{position:fixed;left:14px;bottom:14px;z-index:2147483600;background:#111827;color:#fff;padding:9px 14px;
   border-radius:8px;font:12.5px/1.6 -apple-system,"PingFang SC",sans-serif;max-width:62vw;box-shadow:0 4px 16px rgba(0,0,0,.3)}
 #__hx_pins{position:absolute;left:0;top:0;width:0;height:0;z-index:2147483500}
@@ -344,6 +368,10 @@
 <button data-act="addText" title="在选中元素后插入文字段落">+文字</button>
 <button data-act="addImg" title="把剪贴板里的截图插到选中元素后">+截图</button>
 <span class="hx-sep"></span>
+<button data-act="note" title="把选中元素标记/取消标记为「标注」：平时保存保留，交付另存时一键剥离">✏标注</button>
+<button data-act="notesVis" title="隐藏/显示全部标注，预览交付效果">👁</button>
+<button data-act="deliver" title="另存为不含任何标注的干净交付版（·交付.html），工作稿不动">交付另存</button>
+<span class="hx-sep"></span>
 <button data-act="comment" title="评论选中的元素（所有打开本页的人都能看到）">💬评论</button>
 <button data-act="undo" title="撤销（Cmd/Ctrl+Z）">撤销</button>
 <button data-act="save" class="hx-save"></button>`;
@@ -377,6 +405,9 @@
         else if (act === 'down') move(1);
         else if (act === 'addText') addText();
         else if (act === 'addImg') addImg();
+        else if (act === 'note') toggleNote();
+        else if (act === 'notesVis') toggleNotesVisible();
+        else if (act === 'deliver') save('deliver');
         else if (act === 'comment') focusCompose();
         else if (act === 'undo') undo();
         else if (act === 'save') save();
@@ -630,6 +661,7 @@
   window.__hx = {
     select: s => { const el = typeof s === 'string' ? document.querySelector(s) : s; select(el || null); return el; },
     copy, paste, del, save, undo, serialize, addText, addImg, scopeCss,
+    note: toggleNote, deliver: () => save('deliver'),
     comments: { load: loadComments, post: postComment, list: () => S.comments },
     state: S,
   };
