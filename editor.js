@@ -16,7 +16,7 @@
   let lastMode = null;
   const WIRED = new WeakSet();
 
-  const isUI = el => !!(el && el.closest && el.closest('#__hx, #__hx_toast'));
+  const isUI = el => !!(el && el.closest && el.closest('#__hx, #__hx_toast, #__hx_cpanel, #__hx_pins'));
   const isRoot = el => !el || el === el.ownerDocument.documentElement || el === el.ownerDocument.body || el === el.ownerDocument.head;
   const inFrame = el => !!(el && el.ownerDocument !== document);
   const label = el => {
@@ -78,7 +78,7 @@
 
   /* ---------- 序列化 / 快照 ---------- */
   function cleanInto(node) {
-    node.querySelectorAll('#__hx, #__hx_toast, #__hx_style, [data-hx-editor]').forEach(n => n.remove());
+    node.querySelectorAll('#__hx, #__hx_toast, #__hx_style, #__hx_cpanel, #__hx_pins, [data-hx-editor]').forEach(n => n.remove());
     node.querySelectorAll('.hx-hov, .hx-sel').forEach(n => {
       n.classList.remove('hx-hov', 'hx-sel');
       if (!n.getAttribute('class')) n.removeAttribute('class');
@@ -298,7 +298,33 @@
 .hx-hov{outline:1px dashed #818cf8 !important;outline-offset:1px !important;cursor:default !important}
 .hx-sel{outline:2px solid #4f46e5 !important;outline-offset:2px !important}
 #__hx_toast{position:fixed;left:14px;bottom:14px;z-index:2147483600;background:#111827;color:#fff;padding:9px 14px;
-  border-radius:8px;font:12.5px/1.6 -apple-system,"PingFang SC",sans-serif;max-width:62vw;box-shadow:0 4px 16px rgba(0,0,0,.3)}`;
+  border-radius:8px;font:12.5px/1.6 -apple-system,"PingFang SC",sans-serif;max-width:62vw;box-shadow:0 4px 16px rgba(0,0,0,.3)}
+#__hx_pins{position:absolute;left:0;top:0;width:0;height:0;z-index:2147483500}
+.hx-pin{position:absolute;width:20px;height:20px;border-radius:50% 50% 50% 4px;background:#d08838;color:#fff;font:600 11px/20px -apple-system,sans-serif;
+  text-align:center;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,.25);transform:translate(-4px,-10px)}
+.hx-pin:hover{background:#b45309}
+#__hx_cpanel{position:fixed;right:10px;bottom:10px;z-index:2147483590;width:320px;background:#fff;border:1px solid #d1d5db;border-radius:10px;
+  box-shadow:0 8px 28px rgba(0,0,0,.18);font:12.5px/1.6 -apple-system,"PingFang SC",sans-serif;color:#111;display:flex;flex-direction:column;max-height:52vh}
+#__hx_cpanel.hx-folded{width:auto;max-height:none}
+#__hx_cpanel.hx-folded .hx-cbody{display:none}
+#__hx_cpanel .hx-chead{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid #f0f0f0;cursor:pointer;font-weight:600}
+#__hx_cpanel .hx-chead .hx-cref{margin-left:auto;font-weight:400;color:#6b7280;cursor:pointer}
+#__hx_cpanel .hx-cbody{overflow-y:auto;padding:8px 12px;display:flex;flex-direction:column;gap:8px}
+#__hx_cpanel textarea{width:100%;box-sizing:border-box;min-height:48px;border:1px solid #d1d5db;border-radius:6px;padding:6px 8px;
+  font:12.5px/1.5 -apple-system,"PingFang SC",sans-serif;resize:vertical}
+#__hx_cpanel .hx-csubmit{align-self:flex-end;padding:3px 12px;border:none;border-radius:5px;background:#d08838;color:#fff;font:600 12px -apple-system,sans-serif;cursor:pointer}
+#__hx_cpanel .hx-csubmit:hover{background:#b45309}
+#__hx_cpanel .hx-ctarget{font-size:11px;color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hx-citem{border:1px solid #f0f0f0;border-radius:8px;padding:8px 10px}
+.hx-citem .hx-cmeta{display:flex;gap:6px;align-items:center;font-size:11px;color:#8c8c8c}
+.hx-citem .hx-cmeta b{color:#303030;font-size:12px}
+.hx-citem .hx-cmeta .hx-cdel{margin-left:auto;cursor:pointer;color:#bfbfbf}
+.hx-citem .hx-cmeta .hx-cdel:hover{color:#ef4444}
+.hx-citem .hx-cwhere{font-size:11px;color:#1d58d1;cursor:pointer;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hx-citem .hx-cwhere.hx-lost{color:#b45309;cursor:default}
+.hx-citem .hx-ctext{margin-top:4px;white-space:pre-wrap;word-break:break-word}
+.hx-flash{animation:hxflash 1.6s ease}
+@keyframes hxflash{0%,60%{outline:3px solid #d08838;outline-offset:3px}100%{outline:0 solid transparent}}`;
 
   const BAR = `
 <span class="hx-mode"></span>
@@ -318,6 +344,7 @@
 <button data-act="addText" title="在选中元素后插入文字段落">+文字</button>
 <button data-act="addImg" title="把剪贴板里的截图插到选中元素后">+截图</button>
 <span class="hx-sep"></span>
+<button data-act="comment" title="评论选中的元素（所有打开本页的人都能看到）">💬评论</button>
 <button data-act="undo" title="撤销（Cmd/Ctrl+Z）">撤销</button>
 <button data-act="save" class="hx-save"></button>`;
 
@@ -350,6 +377,7 @@
         else if (act === 'down') move(1);
         else if (act === 'addText') addText();
         else if (act === 'addImg') addImg();
+        else if (act === 'comment') focusCompose();
         else if (act === 'undo') undo();
         else if (act === 'save') save();
       }, true);
@@ -362,6 +390,8 @@
       try { d = f.contentDocument; } catch (e) { /* 跨域跳过 */ }
       if (d && d.body && d.readyState !== 'loading') wireDoc(d);
     });
+    ensureCPanel();
+    repositionPins();
     updateBar();
   }
   function updateBar() {
@@ -378,6 +408,7 @@
     bar.querySelector('[data-act=interact]').textContent = S.interact ? '🖱 交互中→切选择' : '⛶ 选择中→切交互';
     bar.querySelector('.hx-crumb').textContent = label(S.sel);
     bar.querySelector('[data-act=save]').textContent = S.mode === 'freeze' ? '冻结另存 ⬇' : '保存 ✓';
+    updateComposeTarget();
   }
 
   let toastTimer = null;
@@ -437,10 +468,169 @@
     }, true);
   }
 
+  /* ---------- 评论（服务端 .comments/ 边车存储，所有打开者可见；不进文档本体） ---------- */
+  S.comments = [];
+  let lastCommentsJson = '';
+
+  function cssPath(el) {
+    const parts = [];
+    while (el && el.nodeType === 1 && el !== document.body && el !== document.documentElement) {
+      if (el.id && !el.id.startsWith('__hx')) { parts.unshift('#' + CSS.escape(el.id)); break; }
+      let i = 1, sib = el;
+      while ((sib = sib.previousElementSibling)) i++;
+      parts.unshift(el.tagName.toLowerCase() + ':nth-child(' + i + ')');
+      el = el.parentElement;
+    }
+    return parts.join(' > ');
+  }
+  const locateEl = c => { try { return c.sel ? document.querySelector(c.sel) : null; } catch (e) { return null; } };
+  const fmtTs = ts => { const d = new Date(ts); const p = n => String(n).padStart(2, '0'); return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`; };
+
+  async function loadComments() {
+    try {
+      const r = await fetch('/__comments?path=' + encodeURIComponent(PATH));
+      const j = await r.json();
+      if (!j.ok) return;
+      const s = JSON.stringify(j.comments);
+      if (s === lastCommentsJson) return;
+      lastCommentsJson = s;
+      S.comments = j.comments;
+      renderComments();
+    } catch (e) { /* 服务器没开评论接口就静默 */ }
+  }
+  async function postComment(payload) {
+    const r = await fetch('/__comment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ path: PATH }, payload)) });
+    const j = await r.json();
+    if (!j.ok) { toast('评论保存失败：' + j.error, 6000); return false; }
+    lastCommentsJson = JSON.stringify(j.comments);
+    S.comments = j.comments;
+    renderComments();
+    return true;
+  }
+
+  function ensureCPanel() {
+    if (document.getElementById('__hx_cpanel') || !document.body) return;
+    const p = document.createElement('div');
+    p.id = '__hx_cpanel';
+    p.className = 'hx-folded';
+    p.innerHTML = `
+<div class="hx-chead"><span>💬 评论 <span class="hx-ccount">0</span></span><span class="hx-cref" title="手动刷新">↻</span></div>
+<div class="hx-cbody">
+  <div class="hx-ctarget"></div>
+  <textarea placeholder="选中一个元素，在这里写评论…（所有打开本页的人都能看到）"></textarea>
+  <button class="hx-csubmit">发表</button>
+  <div class="hx-clist"></div>
+</div>`;
+    p.querySelector('.hx-chead').addEventListener('click', e => {
+      if (e.target.classList.contains('hx-cref')) { e.stopPropagation(); lastCommentsJson = ''; loadComments(); toast('评论已刷新'); return; }
+      p.classList.toggle('hx-folded');
+    });
+    p.querySelector('.hx-csubmit').addEventListener('click', async () => {
+      const ta = p.querySelector('textarea');
+      const text = ta.value.trim();
+      if (!text) return toast('评论内容为空');
+      if (!S.sel) return toast('先在页面里选中要评论的元素');
+      if (inFrame(S.sel)) return toast('暂不支持评论 iframe 内部元素，请选它的外层容器');
+      let author = localStorage.getItem('__hx_author');
+      if (!author) {
+        author = (prompt('你的名字（评论署名，本浏览器只问一次）') || '').trim();
+        if (!author) return;
+        localStorage.setItem('__hx_author', author);
+      }
+      const ok = await postComment({ action: 'add', comment: {
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        ts: Date.now(), author, text, sel: cssPath(S.sel), label: label(S.sel),
+      } });
+      if (ok) { ta.value = ''; toast('评论已发表 ✓'); }
+    });
+    document.body.appendChild(p);
+    loadComments();
+  }
+
+  function renderComments() {
+    const p = document.getElementById('__hx_cpanel');
+    if (!p) return;
+    p.querySelector('.hx-ccount').textContent = S.comments.length;
+    const list = p.querySelector('.hx-clist');
+    list.innerHTML = '';
+    [...S.comments].sort((a, b) => b.ts - a.ts).forEach(c => {
+      const el = locateEl(c);
+      const item = document.createElement('div');
+      item.className = 'hx-citem';
+      item.innerHTML = `
+<div class="hx-cmeta"><b></b><span>${fmtTs(c.ts)}</span><span class="hx-cdel" title="删除这条评论">✕</span></div>
+<div class="hx-cwhere${el ? '' : ' hx-lost'}"></div>
+<div class="hx-ctext"></div>`;
+      item.querySelector('b').textContent = c.author || '匿名';
+      item.querySelector('.hx-cwhere').textContent = el ? '📍 ' + (c.label || c.sel) : '⚠ 原位置已被改动 · ' + (c.label || '');
+      item.querySelector('.hx-ctext').textContent = c.text;
+      if (el) item.querySelector('.hx-cwhere').addEventListener('click', () => {
+        el.scrollIntoView({ block: 'center' });
+        el.classList.remove('hx-flash'); void el.offsetWidth; el.classList.add('hx-flash');
+        setTimeout(() => el.classList.remove('hx-flash'), 1700);
+      });
+      item.querySelector('.hx-cdel').addEventListener('click', () => {
+        if (confirm('删除这条评论？（' + (c.author || '匿名') + '：' + c.text.slice(0, 20) + '…）')) postComment({ action: 'delete', id: c.id });
+      });
+      list.appendChild(item);
+    });
+    repositionPins();
+  }
+
+  function repositionPins() {
+    if (!document.body) return;
+    let root = document.getElementById('__hx_pins');
+    if (!root) {
+      root = document.createElement('div');
+      root.id = '__hx_pins';
+      document.body.appendChild(root);
+    }
+    root.innerHTML = '';
+    const rootRect = root.getBoundingClientRect();
+    const sorted = [...S.comments].sort((a, b) => a.ts - b.ts);
+    sorted.forEach((c, i) => {
+      const el = locateEl(c);
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const pin = document.createElement('div');
+      pin.className = 'hx-pin';
+      pin.textContent = i + 1;
+      pin.title = (c.author || '匿名') + '：' + c.text.slice(0, 60);
+      pin.style.left = (r.right - rootRect.left) + 'px';
+      pin.style.top = (r.top - rootRect.top) + 'px';
+      pin.addEventListener('click', () => {
+        const p = document.getElementById('__hx_cpanel');
+        if (p) p.classList.remove('hx-folded');
+        el.classList.remove('hx-flash'); void el.offsetWidth; el.classList.add('hx-flash');
+        setTimeout(() => el.classList.remove('hx-flash'), 1700);
+      });
+      root.appendChild(pin);
+    });
+  }
+
+  function focusCompose() {
+    if (!S.sel) return toast('先选中要评论的元素，再点 💬评论');
+    const p = document.getElementById('__hx_cpanel');
+    if (!p) return;
+    p.classList.remove('hx-folded');
+    updateComposeTarget();
+    p.querySelector('textarea').focus();
+  }
+  function updateComposeTarget() {
+    const p = document.getElementById('__hx_cpanel');
+    if (!p) return;
+    p.querySelector('.hx-ctarget').textContent = S.sel ? '评论对象：' + label(S.sel) : '评论对象：未选中（先点选页面元素）';
+  }
+
+  if (!window.__hxCommentPoll) {
+    window.__hxCommentPoll = setInterval(() => { if (!document.hidden) loadComments(); }, 12000);
+  }
+
   /* ---------- 程序化 API ---------- */
   window.__hx = {
     select: s => { const el = typeof s === 'string' ? document.querySelector(s) : s; select(el || null); return el; },
     copy, paste, del, save, undo, serialize, addText, addImg, scopeCss,
+    comments: { load: loadComments, post: postComment, list: () => S.comments },
     state: S,
   };
 

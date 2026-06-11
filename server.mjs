@@ -38,6 +38,16 @@ function safe(rel) {
   if (p !== root && !p.startsWith(root + path.sep)) throw new Error('path escapes root');
   return p;
 }
+
+/* 评论存 <root>/.comments/<文件名>.json —— 与文档分离，不进文档、不受 mtime 锁影响 */
+function commentsFile(rel) {
+  const dir = path.join(root, '.comments');
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, path.basename(safe(rel)) + '.json');
+}
+function readComments(rel) {
+  try { return JSON.parse(fs.readFileSync(commentsFile(rel), 'utf8')); } catch { return []; }
+}
 const ts = () => new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
 
 function walk(dir, out = []) {
@@ -86,6 +96,36 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && urlPath === '/__editor.js') {
     res.writeHead(200, { 'Content-Type': MIME['.js'] });
     return res.end(fs.readFileSync(EDITOR_FILE, 'utf8'));
+  }
+
+  if (req.method === 'GET' && urlPath === '/__comments') {
+    try {
+      const rel = u.searchParams.get('path') || '';
+      res.writeHead(200, { 'Content-Type': MIME['.json'] });
+      return res.end(JSON.stringify({ ok: true, comments: readComments(rel) }));
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': MIME['.json'] });
+      return res.end(JSON.stringify({ ok: false, error: String(e && e.message || e) }));
+    }
+  }
+  if (req.method === 'POST' && urlPath === '/__comment') {
+    let body = '';
+    req.on('data', c => { body += c; });
+    req.on('end', () => {
+      try {
+        const { path: rel, action, comment, id } = JSON.parse(body);
+        let list = readComments(rel);
+        if (action === 'add' && comment && comment.text) list.push(comment);
+        else if (action === 'delete') list = list.filter(c => c.id !== id);
+        fs.writeFileSync(commentsFile(rel), JSON.stringify(list, null, 1));
+        res.writeHead(200, { 'Content-Type': MIME['.json'] });
+        res.end(JSON.stringify({ ok: true, comments: list }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': MIME['.json'] });
+        res.end(JSON.stringify({ ok: false, error: String(e && e.message || e) }));
+      }
+    });
+    return;
   }
 
   if (req.method === 'POST' && urlPath === '/__save') {
