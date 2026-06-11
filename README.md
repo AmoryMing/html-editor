@@ -2,6 +2,8 @@
 
 > 本地 HTML 可视化编辑器（WYSIWYG）：把 AI 生成的动态 HTML 一键**冻结**成纯静态，然后像改 PPT 一样**所见即所得**地手改——双击改字、跨文件复制卡片、元素级评论、局域网多人共编，保存自动备份。零依赖，两个文件，一条命令。
 
+![freeze-edit 编辑界面：点选元素（紫框）、标注（橙色虚框）、元素级评论（角标钉 + 右下面板）、顶部工具条](docs/preview.png)
+
 **freeze-edit 是什么？** 一个给「AI 生成的 HTML 设计稿 / HTML PRD / 规格文档」做手工校准的本地 HTML 编辑器。AI（Claude、ChatGPT 等）可以一分钟生成一张漂亮的 HTML 页面，但它做不到"只改这一个字，其他都别动"——每次重新生成都会带来微妙偏移。freeze-edit 解决的就是这最后一公里：**AI 负责生成，人负责定稿**。数据全程不出你的电脑。
 
 **Who is this for (English)?** freeze-edit is a zero-dependency, local-first WYSIWYG HTML editor for hand-calibrating AI-generated HTML pages (Claude artifacts, design specs, HTML PRDs). Freeze a runtime-rendered React/bundler artifact into clean static HTML, then click-select, double-click-edit, copy cards across files (styles carried automatically), comment on any element, and co-edit over LAN — with automatic backups and an mtime conflict lock. Two files, no build step, `node server.mjs <dir>` and you're in.
