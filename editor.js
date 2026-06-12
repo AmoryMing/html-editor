@@ -16,7 +16,7 @@
   let lastMode = null;
   const WIRED = new WeakSet();
 
-  const isUI = el => !!(el && el.closest && el.closest('#__hx, #__hx_toast, #__hx_cpanel, #__hx_pins'));
+  const isUI = el => !!(el && el.closest && el.closest('#__hx, #__hx_toast, #__hx_cpanel, #__hx_pins, #__hx_blocks'));
   const isRoot = el => !el || el === el.ownerDocument.documentElement || el === el.ownerDocument.body || el === el.ownerDocument.head;
   const inFrame = el => !!(el && el.ownerDocument !== document);
   const label = el => {
@@ -78,7 +78,7 @@
 
   /* ---------- 序列化 / 快照 ---------- */
   function cleanInto(node) {
-    node.querySelectorAll('#__hx, #__hx_toast, #__hx_style, #__hx_cpanel, #__hx_pins, #__hx_dropline, [data-hx-editor]').forEach(n => n.remove());
+    node.querySelectorAll('#__hx, #__hx_toast, #__hx_style, #__hx_cpanel, #__hx_pins, #__hx_dropline, #__hx_blocks, [data-hx-editor]').forEach(n => n.remove());
     [node, ...node.querySelectorAll('.hx-hov, .hx-sel, .hx-dragging, .hx-dropbox, .hx-placing, .hx-flash, .hx-dragop')].forEach(n => {
       if (!n.classList) return;
       n.classList.remove('hx-hov', 'hx-sel', 'hx-dragging', 'hx-dropbox', 'hx-placing', 'hx-flash', 'hx-dragop');
@@ -407,8 +407,25 @@ html.hx-hide-notes [data-hx-note]{display:none !important}
 .hx-dragging{opacity:.45 !important;outline:2px dashed #10b981 !important}
 .hx-dropbox{outline:2px dashed #10b981 !important;outline-offset:-2px;background:rgba(16,185,129,.08) !important}
 body.hx-placing{cursor:crosshair !important}
-html.hx-dragop #__hx, html.hx-dragop #__hx_cpanel, html.hx-dragop #__hx_pins,
-body.hx-placing #__hx, body.hx-placing #__hx_cpanel, body.hx-placing #__hx_pins{pointer-events:none !important;opacity:.45}
+html.hx-dragop #__hx, html.hx-dragop #__hx_cpanel, html.hx-dragop #__hx_pins, html.hx-dragop #__hx_blocks,
+body.hx-placing #__hx, body.hx-placing #__hx_cpanel, body.hx-placing #__hx_pins, body.hx-placing #__hx_blocks{pointer-events:none !important;opacity:.45}
+#__hx_blocks{position:fixed;left:10px;top:64px;bottom:12px;z-index:2147483590;width:300px;background:#fff;border:1px solid #d1d5db;
+  border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.18);font:12.5px/1.6 -apple-system,"PingFang SC",sans-serif;color:#111;
+  display:flex;flex-direction:column}
+#__hx_blocks .hx-bhead{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid #f0f0f0;font-weight:600}
+#__hx_blocks .hx-bhead .hx-bx{margin-left:auto;cursor:pointer;color:#9ca3af}
+#__hx_blocks .hx-bhead .hx-bx:hover{color:#ef4444}
+#__hx_blocks select{margin:8px 12px 0;padding:4px 6px;border:1px solid #d1d5db;border-radius:6px;font:12px -apple-system,"PingFang SC",sans-serif;max-width:calc(100% - 24px)}
+#__hx_blocks .hx-bopt{display:flex;align-items:center;gap:6px;padding:6px 12px 0;font-size:11.5px;color:#6b7280}
+#__hx_blocks .hx-blist{overflow-y:auto;padding:8px 12px;display:flex;flex-direction:column;gap:6px}
+.hx-brow{border:1px solid #f0f0f0;border-radius:8px;padding:7px 10px}
+.hx-brow .hx-bt{font-weight:600;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hx-brow .hx-bm{font-size:10.5px;color:#9ca3af;margin:1px 0 5px}
+.hx-brow .hx-bbtns{display:flex;gap:5px;flex-wrap:wrap}
+.hx-brow button{font:11.5px -apple-system,"PingFang SC",sans-serif;padding:1px 8px;border:1px solid #d1d5db;border-radius:5px;background:#fff;cursor:pointer}
+.hx-brow button:hover{background:#eef2ff;border-color:#6366f1}
+.hx-brow button.hx-bswap{background:#4f46e5;color:#fff;border-color:#4f46e5}
+.hx-brow button.hx-bswap:hover{background:#4338ca}
 #__hx_toast{position:fixed;left:14px;bottom:14px;z-index:2147483600;background:#111827;color:#fff;padding:9px 14px;
   border-radius:8px;font:12.5px/1.6 -apple-system,"PingFang SC",sans-serif;max-width:62vw;box-shadow:0 4px 16px rgba(0,0,0,.3)}
 #__hx_pins{position:absolute;left:0;top:0;width:0;height:0;z-index:2147483500}
@@ -441,6 +458,7 @@ body.hx-placing #__hx, body.hx-placing #__hx_cpanel, body.hx-placing #__hx_pins{
   const BAR = `
 <span class="hx-mode"></span>
 <button data-act="interact"></button>
+<button data-act="blocks" title="跨文件区块面板：浏览任意文件（含 .bak 历史备份）的卡片清单，一键复制或替换当前选中">📚区块</button>
 <span class="hx-sep"></span>
 <span class="hx-crumb"></span>
 <button data-act="parent" title="选中父级元素">↑父级</button>
@@ -484,6 +502,7 @@ body.hx-placing #__hx, body.hx-placing #__hx_cpanel, body.hx-placing #__hx_pins{
         if (!b) return;
         const act = b.dataset.act;
         if (act === 'interact') { S.interact = !S.interact; setHover(null); updateBar(); }
+        else if (act === 'blocks') toggleBlocks();
         else if (act === 'parent') parent();
         else if (act === 'copy') copy();
         else if (act === 'paste-replace') paste('replace');
@@ -784,6 +803,73 @@ body.hx-placing #__hx, body.hx-placing #__hx_cpanel, body.hx-placing #__hx_pins{
 
   if (!window.__hxCommentPoll) {
     window.__hxCommentPoll = setInterval(() => { if (!document.hidden) loadComments(); }, 12000);
+  }
+
+  /* ---------- 跨文件区块面板：浏览任意文件/历史备份的 section 清单，取卡或替换 ---------- */
+  async function toggleBlocks() {
+    const old = document.getElementById('__hx_blocks');
+    if (old) { old.remove(); return; }
+    const p = document.createElement('div');
+    p.id = '__hx_blocks';
+    p.innerHTML = `
+<div class="hx-bhead"><span>📚 跨文件区块</span><span class="hx-bx" title="关闭">✕</span></div>
+<select></select>
+<label class="hx-bopt"><input type="checkbox" class="hx-bcss">复制时连带来源样式（目标缺样式时勾选）</label>
+<div class="hx-blist">加载中…</div>`;
+    p.querySelector('.hx-bx').addEventListener('click', () => p.remove());
+    document.body.appendChild(p);
+    let files = [];
+    try {
+      const j = await (await fetch('/__files')).json();
+      files = j.files || [];
+    } catch (e) { p.querySelector('.hx-blist').textContent = '文件列表加载失败：' + e.message; return; }
+    const sel = p.querySelector('select');
+    const cur = decodeURIComponent(PATH).replace(/^\//, '');
+    sel.innerHTML = files.map(f => `<option value="${f.replace(/"/g, '&quot;')}"${f === cur ? ' selected' : ''}>${f.startsWith('.bak/') ? '🕘 ' : ''}${f}</option>`).join('');
+    sel.addEventListener('change', () => loadBlockList(p, sel.value));
+    loadBlockList(p, sel.value || cur);
+  }
+  async function loadBlockList(p, file) {
+    const list = p.querySelector('.hx-blist');
+    list.textContent = '加载中…';
+    let j;
+    try { j = await (await fetch('/__blocks?path=' + encodeURIComponent('/' + file))).json(); }
+    catch (e) { list.textContent = '加载失败：' + e.message; return; }
+    if (!j.ok) { list.textContent = j.error; return; }
+    if (!j.blocks.length) { list.textContent = '该文件没有可识别的 <section> 区块'; return; }
+    const isCur = file === decodeURIComponent(PATH).replace(/^\//, '');
+    list.innerHTML = '';
+    j.blocks.forEach(b => {
+      const row = document.createElement('div');
+      row.className = 'hx-brow';
+      row.innerHTML = `
+<div class="hx-bt"></div><div class="hx-bm">${b.id || ''} · ${(b.chars / 1024).toFixed(1)} KB</div>
+<div class="hx-bbtns">${isCur ? '<button class="hx-bgo">定位选中</button>' : ''}<button class="hx-bcopy">复制</button><button class="hx-bswap">⇄ 替换当前选中</button></div>`;
+      row.querySelector('.hx-bt').textContent = b.title;
+      if (isCur) row.querySelector('.hx-bgo').addEventListener('click', () => {
+        const el = b.id ? document.getElementById(b.id) : document.querySelectorAll('section')[b.i];
+        if (!el) return toast('页面里没找到该区块（可能刚被改过，换个文件再切回来刷新列表）');
+        el.scrollIntoView({ block: 'start' });
+        select(el.closest('section') || el);
+      });
+      const fetchBlock = async () => {
+        const r = await (await fetch(`/__block?path=${encodeURIComponent('/' + file)}&i=${b.i}`)).json();
+        if (!r.ok) { toast('取区块失败：' + r.error, 5000); return null; }
+        const withCss = p.querySelector('.hx-bcss').checked && !isCur;
+        localStorage.setItem('__hx_clip', r.html);
+        if (withCss && r.css) localStorage.setItem('__hx_clip_css', r.css); else localStorage.removeItem('__hx_clip_css');
+        localStorage.setItem('__hx_clip_meta', JSON.stringify({ from: file, tag: 'SECTION', withCss }));
+        return r;
+      };
+      row.querySelector('.hx-bcopy').addEventListener('click', async () => {
+        if (await fetchBlock()) toast(`已复制「${b.title}」— 可在任意文件标签页粘贴/点位粘贴`);
+      });
+      row.querySelector('.hx-bswap').addEventListener('click', async () => {
+        if (!S.sel) return toast('先在页面里选中要被替换的区块（点卡片→↑父级 到整节）');
+        if (await fetchBlock()) paste('replace');
+      });
+      list.appendChild(row);
+    });
   }
 
   /* ---------- 程序化 API ---------- */

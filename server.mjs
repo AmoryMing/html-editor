@@ -48,6 +48,40 @@ function commentsFile(rel) {
 function readComments(rel) {
   try { return JSON.parse(fs.readFileSync(commentsFile(rel), 'utf8')); } catch { return []; }
 }
+
+/* 区块扫描：文件顶层 <section> 列表（供跨文件区块面板取卡） */
+function scanBlocks(html) {
+  const blocks = [];
+  const re = /<section\b[^>]*>|<\/section>/g;
+  let m, depth = 0, start = -1, openTag = '';
+  while ((m = re.exec(html))) {
+    if (m[0][1] !== '/') {
+      if (depth === 0) { start = m.index; openTag = m[0]; }
+      depth++;
+    } else if (depth > 0) {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        const end = m.index + '</section>'.length;
+        const seg = html.slice(start, end);
+        const id = (openTag.match(/id="([^"]+)"/) || [])[1] || '';
+        const title = ((seg.match(/class="tool__cn"[^>]*>([^<]+)/) || seg.match(/<h[1-4][^>]*>([^<]+)/) || [, ''])[1] || '').trim();
+        blocks.push({ i: blocks.length, id, title: title || id || ('区块 ' + (blocks.length + 1)), chars: seg.length, start, end });
+        start = -1;
+      }
+    }
+  }
+  return blocks;
+}
+function listFiles() {
+  const out = walk(root).map(p => path.relative(root, p));
+  const bdir = path.join(root, '.bak');
+  if (fs.existsSync(bdir)) {
+    for (const f of fs.readdirSync(bdir).filter(f => /\.html?$/i.test(f)).sort().reverse().slice(0, 30)) {
+      out.push('.bak/' + f);
+    }
+  }
+  return out;
+}
 const ts = () => new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
 
 function walk(dir, out = []) {
@@ -98,6 +132,28 @@ const server = http.createServer((req, res) => {
     return res.end(fs.readFileSync(EDITOR_FILE, 'utf8'));
   }
 
+  if (req.method === 'GET' && urlPath === '/__files') {
+    res.writeHead(200, { 'Content-Type': MIME['.json'] });
+    return res.end(JSON.stringify({ ok: true, files: listFiles() }));
+  }
+  if (req.method === 'GET' && (urlPath === '/__blocks' || urlPath === '/__block')) {
+    try {
+      const rel = u.searchParams.get('path') || '';
+      const html = fs.readFileSync(safe(rel), 'utf8');
+      const blocks = scanBlocks(html);
+      res.writeHead(200, { 'Content-Type': MIME['.json'] });
+      if (urlPath === '/__blocks') {
+        return res.end(JSON.stringify({ ok: true, blocks: blocks.map(({ i, id, title, chars }) => ({ i, id, title, chars })) }));
+      }
+      const b = blocks[+u.searchParams.get('i')];
+      if (!b) throw new Error('区块不存在');
+      const css = [...html.matchAll(/<style(?:\s[^>]*)?>([\s\S]*?)<\/style>/g)].map(m2 => m2[1]).join('\n');
+      return res.end(JSON.stringify({ ok: true, html: html.slice(b.start, b.end), css }));
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': MIME['.json'] });
+      return res.end(JSON.stringify({ ok: false, error: String(e && e.message || e) }));
+    }
+  }
   if (req.method === 'GET' && urlPath === '/__comments') {
     try {
       const rel = u.searchParams.get('path') || '';
