@@ -290,14 +290,14 @@
   }
   function endDrag(apply) {
     const drag = S.drag;
+    if (!drag) return;                       // 没在拖拽就什么都不碰——点位粘贴靠 click 落位，mouseup 不能把 dropTarget 清掉
     S.drag = null;
-    const d = dropTarget; dropTarget = null;
-    showDropline(null);
     document.documentElement.classList.remove('hx-dragop');
-    if (!drag) return;
     drag.el.classList.remove('hx-dragging');
     if (!drag.el.getAttribute('class')) drag.el.removeAttribute('class');
-    if (!drag.active) return;
+    if (!drag.active) return;                // 只是按下没拖动的普通点击
+    const d = dropTarget; dropTarget = null;
+    showDropline(null);
     suppressClick = true;
     if (apply && d && d.el !== drag.el && !drag.el.contains(d.el)) {
       snapshot();
