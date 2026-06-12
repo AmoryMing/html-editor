@@ -12,7 +12,7 @@
   window.__hxLoaded = true;
 
   const PATH = window.__HX_PATH || decodeURIComponent(location.pathname);
-  const S = (window.__hxState = { sel: null, hov: null, editing: null, undo: [], mode: 'edit', interact: false });
+  const S = (window.__hxState = { sel: null, hov: null, editing: null, undo: [], mode: 'edit', interact: false, drag: null, placing: false });
   let lastMode = null;
   const WIRED = new WeakSet();
 
@@ -78,9 +78,10 @@
 
   /* ---------- 序列化 / 快照 ---------- */
   function cleanInto(node) {
-    node.querySelectorAll('#__hx, #__hx_toast, #__hx_style, #__hx_cpanel, #__hx_pins, [data-hx-editor]').forEach(n => n.remove());
-    node.querySelectorAll('.hx-hov, .hx-sel').forEach(n => {
-      n.classList.remove('hx-hov', 'hx-sel');
+    node.querySelectorAll('#__hx, #__hx_toast, #__hx_style, #__hx_cpanel, #__hx_pins, #__hx_dropline, [data-hx-editor]').forEach(n => n.remove());
+    [node, ...node.querySelectorAll('.hx-hov, .hx-sel, .hx-dragging, .hx-dropbox, .hx-placing, .hx-flash, .hx-dragop')].forEach(n => {
+      if (!n.classList) return;
+      n.classList.remove('hx-hov', 'hx-sel', 'hx-dragging', 'hx-dropbox', 'hx-placing', 'hx-flash', 'hx-dragop');
       if (!n.getAttribute('class')) n.removeAttribute('class');
     });
     node.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
@@ -156,14 +157,12 @@
     if (navigator.clipboard) navigator.clipboard.writeText(html).catch(() => {});
     toast(`已复制 ${label(S.sel)} （${(html.length / 1024).toFixed(1)} KB${css ? '，已连带 iframe 内样式' : ''}）— 可去另一个文件标签页粘贴`);
   }
-  function paste(rel) {
+  /* 取剪贴板 HTML；跨文档复制时把来源样式以命名空间注入目标文档并包一层 */
+  function buildClipHtml(tdoc) {
     let clip = localStorage.getItem('__hx_clip');
-    if (!clip) return toast('剪贴板为空：先在某个文件里「复制」一个元素');
-    if (!S.sel) return toast('先选中目标位置的元素');
-    snapshot();
+    if (!clip) return null;
     const css = localStorage.getItem('__hx_clip_css');
     if (css) {
-      const tdoc = S.sel.ownerDocument;
       const ns = 'hxp-' + hashStr(css);
       if (!tdoc.querySelector(`style[data-hx-ns="${ns}"]`)) {
         const st = tdoc.createElement('style');
@@ -173,6 +172,13 @@
       }
       clip = `<div class="${ns}">` + clip + '</div>';
     }
+    return clip;
+  }
+  function paste(rel) {
+    if (!localStorage.getItem('__hx_clip')) return toast('剪贴板为空：先在某个文件里「复制」一个元素');
+    if (!S.sel) return toast('先选中目标位置的元素');
+    snapshot();
+    const clip = buildClipHtml(S.sel.ownerDocument);
     if (rel === 'replace') {
       S.sel.insertAdjacentHTML('beforebegin', clip);
       const nu = S.sel.previousElementSibling;
@@ -249,6 +255,82 @@
     }
   }
 
+  /* ---------- 拖拽移动 & 点位粘贴（文档流内自由落位：插入线指示器） ---------- */
+  let dropTarget = null, suppressClick = false;
+
+  function computeDrop(x, y, excludeEl) {
+    const t = document.elementFromPoint(x, y);
+    if (!t || isUI(t) || isRoot(t)) return null;
+    if (excludeEl && (t === excludeEl || excludeEl.contains(t))) return null;
+    // 空容器：整个落进去
+    if (t.children.length === 0 && !/^(IMG|BR|HR|INPUT)$/.test(t.tagName) && (t.textContent || '').trim() === '') {
+      return { el: t, pos: 'inside' };
+    }
+    const r = t.getBoundingClientRect();
+    const ps = t.parentElement ? getComputedStyle(t.parentElement) : null;
+    const horiz = !!ps && /flex|grid/.test(ps.display) && !(ps.flexDirection || '').startsWith('column');
+    const before = horiz ? (x < r.left + r.width / 2) : (y < r.top + r.height / 2);
+    return { el: t, pos: before ? 'before' : 'after', horiz };
+  }
+  function showDropline(d) {
+    let line = document.getElementById('__hx_dropline');
+    if (!line) { line = document.createElement('div'); line.id = '__hx_dropline'; document.body.appendChild(line); }
+    document.querySelectorAll('.hx-dropbox').forEach(n => { n.classList.remove('hx-dropbox'); if (!n.getAttribute('class')) n.removeAttribute('class'); });
+    if (!d) { line.style.display = 'none'; return; }
+    if (d.pos === 'inside') { line.style.display = 'none'; d.el.classList.add('hx-dropbox'); return; }
+    const r = d.el.getBoundingClientRect();
+    line.style.display = 'block';
+    if (d.horiz) {
+      line.style.left = (d.pos === 'before' ? r.left - 3 : r.right + 1) + 'px';
+      line.style.top = r.top + 'px'; line.style.width = '3px'; line.style.height = r.height + 'px';
+    } else {
+      line.style.top = (d.pos === 'before' ? r.top - 3 : r.bottom + 1) + 'px';
+      line.style.left = r.left + 'px'; line.style.height = '3px'; line.style.width = r.width + 'px';
+    }
+  }
+  function endDrag(apply) {
+    const drag = S.drag;
+    S.drag = null;
+    const d = dropTarget; dropTarget = null;
+    showDropline(null);
+    document.documentElement.classList.remove('hx-dragop');
+    if (!drag) return;
+    drag.el.classList.remove('hx-dragging');
+    if (!drag.el.getAttribute('class')) drag.el.removeAttribute('class');
+    if (!drag.active) return;
+    suppressClick = true;
+    if (apply && d && d.el !== drag.el && !drag.el.contains(d.el)) {
+      snapshot();
+      d.pos === 'inside' ? d.el.appendChild(drag.el) : d.pos === 'before' ? d.el.before(drag.el) : d.el.after(drag.el);
+      select(drag.el);
+      toast('已移动到插入线位置 ✓');
+    }
+  }
+  function enterPlace() {
+    if (!localStorage.getItem('__hx_clip')) return toast('剪贴板为空：先「复制」一个元素');
+    if (S.placing) return exitPlace();
+    S.placing = true;
+    document.body.classList.add('hx-placing');
+    toast('点位粘贴：移动鼠标看绿色插入线，点击落位（横排容器自动竖线）；Esc 取消', 6000);
+  }
+  function exitPlace() {
+    S.placing = false;
+    document.body.classList.remove('hx-placing');
+    if (!document.body.getAttribute('class')) document.body.removeAttribute('class');
+    dropTarget = null;
+    showDropline(null);
+  }
+  function placeAt(d) {
+    snapshot();
+    const html = buildClipHtml(d.el.ownerDocument);
+    if (d.pos === 'inside') d.el.insertAdjacentHTML('beforeend', html);
+    else d.el.insertAdjacentHTML(d.pos === 'before' ? 'beforebegin' : 'afterend', html);
+    const nu = d.pos === 'inside' ? d.el.lastElementChild : (d.pos === 'before' ? d.el.previousElementSibling : d.el.nextElementSibling);
+    exitPlace();
+    select(nu);
+    toast('已插入到指定位置 ✓');
+  }
+
   /* ---------- 文字编辑 ---------- */
   function startEdit(el) {
     if (isUI(el) || isRoot(el)) return;
@@ -321,6 +403,12 @@
 .hx-sel{outline:2px solid #4f46e5 !important;outline-offset:2px !important}
 [data-hx-note]{outline:1.5px dashed #d08838 !important;outline-offset:2px;background:rgba(208,136,56,.07) !important}
 html.hx-hide-notes [data-hx-note]{display:none !important}
+#__hx_dropline{position:fixed;z-index:2147483599;background:#10b981;pointer-events:none;display:none;border-radius:2px;box-shadow:0 0 0 1px rgba(16,185,129,.4)}
+.hx-dragging{opacity:.45 !important;outline:2px dashed #10b981 !important}
+.hx-dropbox{outline:2px dashed #10b981 !important;outline-offset:-2px;background:rgba(16,185,129,.08) !important}
+body.hx-placing{cursor:crosshair !important}
+html.hx-dragop #__hx, html.hx-dragop #__hx_cpanel, html.hx-dragop #__hx_pins,
+body.hx-placing #__hx, body.hx-placing #__hx_cpanel, body.hx-placing #__hx_pins{pointer-events:none !important;opacity:.45}
 #__hx_toast{position:fixed;left:14px;bottom:14px;z-index:2147483600;background:#111827;color:#fff;padding:9px 14px;
   border-radius:8px;font:12.5px/1.6 -apple-system,"PingFang SC",sans-serif;max-width:62vw;box-shadow:0 4px 16px rgba(0,0,0,.3)}
 #__hx_pins{position:absolute;left:0;top:0;width:0;height:0;z-index:2147483500}
@@ -361,6 +449,7 @@ html.hx-hide-notes [data-hx-note]{display:none !important}
 <button data-act="paste-replace" title="用剪贴板内容替换选中元素">替换</button>
 <button data-act="paste-before" title="粘贴到选中元素前">前插</button>
 <button data-act="paste-after" title="粘贴到选中元素后">后插</button>
+<button data-act="place" title="点位粘贴：进入放置模式，鼠标处显示插入线，点哪插哪（Esc 取消）">点位粘贴</button>
 <span class="hx-sep"></span>
 <button data-act="del" title="删除选中元素（Delete）">删除</button>
 <button data-act="up" title="与前一个兄弟元素交换位置">▲</button>
@@ -400,6 +489,7 @@ html.hx-hide-notes [data-hx-note]{display:none !important}
         else if (act === 'paste-replace') paste('replace');
         else if (act === 'paste-before') paste('before');
         else if (act === 'paste-after') paste('after');
+        else if (act === 'place') enterPlace();
         else if (act === 'del') del();
         else if (act === 'up') move(-1);
         else if (act === 'down') move(1);
@@ -465,7 +555,36 @@ html.hx-hide-notes [data-hx-note]{display:none !important}
       st.textContent = CSS;
       doc.head.appendChild(st);
     }
+    if (doc === document) {
+      // 拖拽移动：在已选中元素上按下并拖动（仅顶层文档）
+      doc.addEventListener('mousedown', e => {
+        if (e.button !== 0 || S.interact || S.editing || S.placing) return;
+        const t = e.target;
+        if (isUI(t) || !S.sel || inFrame(S.sel)) return;
+        if (t === S.sel || S.sel.contains(t)) S.drag = { el: S.sel, sx: e.clientX, sy: e.clientY, active: false };
+      }, true);
+      window.addEventListener('mouseup', () => endDrag(true), true);
+    }
     doc.addEventListener('mousemove', e => {
+      if (doc === document && S.drag) {
+        if (!S.drag.active && Math.hypot(e.clientX - S.drag.sx, e.clientY - S.drag.sy) > 6) {
+          S.drag.active = true;
+          S.drag.el.classList.add('hx-dragging');
+          document.documentElement.classList.add('hx-dragop');   // 工具条/面板对鼠标透明，不挡落点
+          setHover(null);
+        }
+        if (S.drag.active) {
+          e.preventDefault();
+          dropTarget = computeDrop(e.clientX, e.clientY, S.drag.el);
+          showDropline(dropTarget);
+          return;
+        }
+      }
+      if (doc === document && S.placing) {
+        dropTarget = computeDrop(e.clientX, e.clientY, null);
+        showDropline(dropTarget);
+        return;
+      }
       if (S.interact && !e.altKey) return setHover(null);
       const t = e.target;
       if (isUI(t) || isRoot(t) || S.editing) return setHover(null);
@@ -473,6 +592,12 @@ html.hx-hide-notes [data-hx-note]{display:none !important}
     }, true);
     doc.addEventListener('click', e => {
       const t = e.target;
+      if (suppressClick) { suppressClick = false; e.preventDefault(); e.stopPropagation(); return; }   // 拖拽落位后的尾随点击
+      if (doc === document && S.placing) {
+        e.preventDefault(); e.stopPropagation();
+        if (!isUI(t) && dropTarget) placeAt(dropTarget);
+        return;
+      }
       if (isUI(t)) return;
       if (S.editing) {
         if (S.editing.contains(t)) return;       // 编辑中：元素内点击放行（移动光标）
@@ -495,7 +620,11 @@ html.hx-hide-notes [data-hx-note]{display:none !important}
       }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && S.sel) { e.preventDefault(); del(); }
-      else if (e.key === 'Escape') select(null);
+      else if (e.key === 'Escape') {
+        if (S.placing) { exitPlace(); toast('已取消点位粘贴'); }
+        else if (S.drag) { endDrag(false); toast('已取消拖拽'); }
+        else select(null);
+      }
     }, true);
   }
 
@@ -661,7 +790,7 @@ html.hx-hide-notes [data-hx-note]{display:none !important}
   window.__hx = {
     select: s => { const el = typeof s === 'string' ? document.querySelector(s) : s; select(el || null); return el; },
     copy, paste, del, save, undo, serialize, addText, addImg, scopeCss,
-    note: toggleNote, deliver: () => save('deliver'),
+    note: toggleNote, deliver: () => save('deliver'), place: enterPlace, computeDrop, placeAt,
     comments: { load: loadComments, post: postComment, list: () => S.comments },
     state: S,
   };
